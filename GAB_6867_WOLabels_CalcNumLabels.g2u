@@ -1,0 +1,116 @@
+﻿Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Look up Pcs per Carton (for WO Labels) and Cartons per Pallet (for SO Labels) from the Inventory Master > Options screen 
+'and used to calculate & populate the # of Labels field.
+'By Josh Withrow
+
+'HOOKS
+'30230 - Populate
+'30232 - Order Line Selected
+'30234 - Job Selected
+'30250 - Script 1 - "Recalc # of Lbls"
+
+F.Intrinsic.Control.SelectCase(V.Caller.Hook)
+	F.Intrinsic.Control.Case(30230)
+		V.Passed.000082.Set("Recalc # of Lbls")
+		
+	F.Intrinsic.Control.Case(30232)
+		F.Intrinsic.Control.CallSub(FetchAndCalc)
+		
+	F.Intrinsic.Control.Case(30234)
+		F.Intrinsic.Control.CallSub(FetchAndCalc)
+		
+	F.Intrinsic.Control.Case(30250)
+		F.Intrinsic.Control.CallSub(FetchAndCalc)
+				
+	F.Intrinsic.Control.CaseElse
+		'Something's fishy!
+F.Intrinsic.Control.EndSelect
+
+Program.Sub.Main.End
+
+Program.Sub.FetchAndCalc.Start
+F.Intrinsic.Control.Try
+
+'PASSED
+'000014 - # of Labels
+'000009 - Part
+'000005 - Rev
+'000049 - Location
+'000051 - Order Qty
+'000082 - Script 1
+'GLOBAL - Passed Job/Sfx from Dashboard?
+
+'SWITCHES
+'V.Caller.Switch = S or W
+	
+	V.Local..BulkDeclareString(sSQL,sGSSPart,sRet)
+	V.Local..BulkDeclareFloat(fOrderQty,fQtyPerCarton,fQtyPerPallet,fCartonLabels,fPalletLabels)
+	V.Local..BulkDeclareLong(iCartonLabels,iPalletLabels)
+	
+	'Format GSS Part Number from Part/Rev Passed Vars...
+	F.Intrinsic.String.GSSPartString(V.Passed.000009,V.Passed.000005,V.Local.sGSSPart)
+	
+	'Build SQL statement using Part & Location
+	F.Intrinsic.String.Build("select top 1 PCS_PER_CNTNR, CNTNRS_PER_PALLET from v_inventory_all where PART='{0}' and LOCATION='{1}'",V.Local.sGSSPart,V.Passed.000049,V.Local.sSQL)
+	
+	'Open connection, retrieve Pcs per Carton, close connection
+	F.ODBC.Connection!con.OpenCompanyConnection
+	F.ODBC.Connection!con.ExecuteAndReturn(V.Local.sSQL,V.Local.sRet)
+	F.ODBC.Connection!con.Close
+	
+	F.Intrinsic.String.Split(V.Local.sRet,"*!*",V.Local.sRet)
+	
+	'Preparing for math...
+	F.Intrinsic.Math.ConvertToFloat(V.Local.sRet(0),V.Local.fQtyPerCarton)
+	F.Intrinsic.Math.ConvertToFloat(V.Local.sRet(1),V.Local.fQtyPerPallet)
+	F.Intrinsic.Math.ConvertToFloat(V.Passed.000051,V.Local.fOrderQty)
+	
+	'Check for values before we try to do math...
+	F.Intrinsic.Control.If(V.Local.fOrderQty,>,0)
+		F.Intrinsic.Control.If(V.Local.fQtyPerCarton,>,0)
+			
+			'Do math...
+			F.Intrinsic.Math.Div(V.Local.fOrderQty,V.Local.fQtyPerCarton,V.Local.fCartonLabels)
+			F.Intrinsic.Math.Ceiling(V.Local.fCartonLabels,V.Local.iCartonLabels)
+			
+			F.Intrinsic.Control.If(V.Local.fQtyPerPallet,>,0)
+				F.Intrinsic.Math.Div(V.Local.iCartonLabels,V.Local.fQtyPerPallet,V.Local.fPalletLabels)
+				F.Intrinsic.Math.Ceiling(V.Local.fPalletLabels,V.Local.iPalletLabels)
+			F.Intrinsic.Control.EndIf
+			
+			F.Intrinsic.Control.SelectCase(V.Caller.Switches)
+				F.Intrinsic.Control.Case("W")
+					'If math made a number, write number to # of Labels field. (WO Labels)
+					F.Intrinsic.Control.If(V.Local.iCartonLabels,>,0)
+						V.Passed.000014.Set(V.Local.iCartonLabels)
+					F.Intrinsic.Control.EndIf
+					
+				F.Intrinsic.Control.Case("S")
+					'If math made a number, write number to # of Labels field. (SO Labels)
+					F.Intrinsic.Control.If(V.Local.iPalletLabels,>,0)
+						V.Passed.000014.Set(V.Local.iPalletLabels)
+					F.Intrinsic.Control.EndIf
+				F.Intrinsic.Control.CaseElse
+					'What does it mean?
+			F.Intrinsic.Control.EndSelect
+		F.Intrinsic.Control.Else
+			F.Intrinsic.UI.Msgbox("Please enter # of Labels.","Alert")
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Else
+		F.Intrinsic.UI.Msgbox("Please enter (Order) Quantity.","Alert")
+	F.Intrinsic.Control.EndIf
+	
+F.Intrinsic.Control.Catch
+	V.Local..BulkDeclareString(sError)
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}", V.Ambient.ScriptPath, V.Ambient.Newline, V.Ambient.CurrentSubroutine, V.Ambient.ErrorNumber, V.Ambient.ErrorDescription, V.Ambient.GABVersion, V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+F.Intrinsic.Control.EndTry
+Program.Sub.FetchAndCalc.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8328.25015$}$1
+${$6$}$jwithrow$}$20221110160442738$}$D95tSYIikIvF+oq+s87EtBQePACEH+EydNCoHDy8n1pL7CewzEnzSH4DKHXh8Im8/UBHULJtMR7XQMkQkw2jMw==
+Program.Sub.Comments.End
